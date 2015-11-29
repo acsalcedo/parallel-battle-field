@@ -8,10 +8,13 @@ Proyecto 3 para Sistemas de Operación 3 - Sept-Dic 2015
 ### Para correr las pruebas:
 
 1. Prueba 1:
+
         mpirun --disable-hostname-propagation -n 4 -machinefile maquinas.txt ./battle ./tests/test
 2. Prueba 2:
+
         mpirun --disable-hostname-propagation -n 9 -machinefile maquinas.txt ./battle ./tests/test2
 3. Prueba 3:
+
         mpirun --disable-hostname-propagation -n 22 -machinefile maquinas.txt ./battle ./tests/test3
 
 
