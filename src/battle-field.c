@@ -48,22 +48,13 @@ int main (int argc, char **argv) {
     fscanf(file, "%i", &size);      //Lee el tamano del campo.
     fscanf(file, "%i", &targets);   //Lee la cantidad de blancos.
 
-    // Calculo los limites de cada proceso
-    // razon emplea redondeo
-    int razon = (targets + (numeroProcesos / 2)) / numeroProcesos;
-    int inicio = id * razon;
-    int fin = inicio + razon - 1;
+    int sizeTargets = targets / numeroProcesos;
+    int remain = targets % numeroProcesos;
 
+    if (id < remain)
+        sizeTargets++;
 
-    //printf("P%d :: Inicio -> %d, Fin -> %d\n", id, inicio, fin);
-
-    if ((targets % numeroProcesos) && (id == numeroProcesos-1) && (id != 0)) {
-        fin += 1;
-        //printf("Impar fin. Division %d\n", (targets + (numeroProcesos / 2)) / numeroProcesos);
-    }
-
-    // Dar la razon de blancos/procesos para particionamiento del problema
-    blancos = (struct Target *) malloc((fin-inicio + 1) * sizeof(struct Target));
+    blancos = (struct Target *) malloc(sizeTargets * sizeof(struct Target));
 
     if (blancos == NULL) {
         fprintf(stderr, "No hay memoria\n");
@@ -72,15 +63,14 @@ int main (int argc, char **argv) {
 
     /* Lee todas las lineas relevantes a los blancos, guarda el blanco
      * que le pertenece al proceso. */
-
     int j = 0;
     for (i = 0; i < targets; i++) {
-        if (inicio <= i && i <= fin) {
+        if (i % numeroProcesos == id) {
             fscanf(file, "%i %i %i", &(blancos[j].coordx),
                                         &(blancos[j].coordy),
                                             &(blancos[j].strength));
             blancos[j].oldStrength = blancos[j].strength;
-            j += 1;
+            j++;
         } else
             fscanf(file, "%*i %*i %*i");
     }
@@ -101,7 +91,6 @@ int main (int argc, char **argv) {
         fscanf(file, "%i %i %i %i", &singleAttack.coordx, &singleAttack.coordy,
                                     &singleAttack.radius, &singleAttack.power);
         attacks[i] = singleAttack;
-
     }
 
     int radioX_Sup = 0, radioY_Sup = 0;
@@ -111,9 +100,9 @@ int main (int argc, char **argv) {
 
     /* Hace los calculos de los ataques en los blancos. Cada proceso calcula
      * la fuerza del blanco despues del ataque. */
-    struct Resultado resultado[fin - inicio + 1];
+    struct Resultado resultado[sizeTargets];
 
-    for (j = 0; j < fin - inicio + 1; ++j) {
+    for (j = 0; j < sizeTargets; ++j) {
         for (i = 0; i < numAttacks; i++) {
             struct Attack singleAttack = attacks[i];
             radioX_Sup = singleAttack.coordx + singleAttack.radius;
@@ -124,7 +113,6 @@ int main (int argc, char **argv) {
             if ((radioX_Inf <= blancos[j].coordx && blancos[j].coordx <= radioX_Sup)
                 && (radioY_Inf <= blancos[j].coordy && blancos[j].coordy <= radioY_Sup)) {
 
-
                 // Si el blanco es militar
                 if (blancos[j].oldStrength < 0) {
                     blancos[j].strength += singleAttack.power;
@@ -132,8 +120,9 @@ int main (int argc, char **argv) {
                     // Si el blanco es destruido asigna 0
                     if (blancos[j].strength >= 0)
                         blancos[j].strength = 0;
-                } else {
+
                 // Si el blanco es civil
+                } else {
                     blancos[j].strength -= singleAttack.power;
 
                     // Si el blanco es destruido asigna 0
@@ -142,24 +131,20 @@ int main (int argc, char **argv) {
                 }
             }
         }
-
         resultado[j].oldStrength = blancos[j].oldStrength;
         resultado[j].strength = blancos[j].strength;
-        /*printf("Resultado::: P%d ->> Strength: %i, oldStrength: %i\n", id,
-            resultado[j].strength, resultado[j].oldStrength);*/
     }
 
     //El proceso 0 recibe los resultados de los otros procesos y los imprime.
     if (id == 0) {
-        struct Resultado respuesta[fin - inicio + 1];
+        struct Resultado respuesta[targets];
 
-        for (j = 0; j < fin - inicio + 1; ++j) {
+        for (j = 0; j < sizeTargets; ++j) {
             respuesta[j] = resultado[j];
         }
 
-        //
+        //Recibe la respuestas
         for (i = j; i < targets; ++i) {
-            //Recibe la respuesta
             MPI_Recv(&respuesta[i],2,MPI_INT,MPI_ANY_SOURCE,MPI_ANY_TAG,
                      MPI_COMM_WORLD,MPI_STATUS_IGNORE);
         }
@@ -177,8 +162,8 @@ int main (int argc, char **argv) {
                     else
                     intactos_CT += 1;
                 }
-            } else {
             // Si el blanco es MT
+            } else {
                 if (respuesta[i].oldStrength < respuesta[i].strength &&
                     respuesta[i].strength < 0)
                     parcial_destruidos_MT += 1;
@@ -199,12 +184,11 @@ int main (int argc, char **argv) {
         printf("Civilian Targets partially destroyed: %d\n", parcial_destruidos_CT);
         printf("Civilian Targets not affected: %8d\n", intactos_CT);
     } else {
-        //Manda el resultado al proceso 0.
-        for (i = 0; i < fin-inicio + 1; ++i) {
+        //Manda los resultados al proceso 0.
+        for (i = 0; i < sizeTargets; ++i) {
             MPI_Send(&resultado[i],2,MPI_INT,0,0,MPI_COMM_WORLD);
         }
     }
-
     free(blancos);
     free(attacks);
     MPI_Finalize();
