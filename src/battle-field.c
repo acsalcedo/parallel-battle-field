@@ -100,7 +100,7 @@ int main (int argc, char **argv) {
 
     /* Hace los calculos de los ataques en los blancos. Cada proceso calcula
      * la fuerza del blanco despues del ataque. */
-    struct Resultado resultado[sizeTargets];
+    struct Resultado resultado[sizeTargets] = (struct Resultado *) malloc(sizeTargets * sizeof(struct Resultado));
 
     for (j = 0; j < sizeTargets; ++j) {
         for (i = 0; i < numAttacks; i++) {
@@ -137,7 +137,7 @@ int main (int argc, char **argv) {
 
     //El proceso 0 recibe los resultados de los otros procesos y los imprime.
     if (id == 0) {
-        struct Resultado respuesta[targets];
+        struct Resultado *respuesta = (struct Resultado *) malloc(targets * sizeof(struct Resultado));
 
         for (j = 0; j < sizeTargets; ++j) {
             respuesta[j] = resultado[j];
