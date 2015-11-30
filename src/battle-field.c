@@ -40,7 +40,6 @@ int main (int argc, char **argv) {
 
     struct Attack *attacks;
     struct Target *blancos;
-    struct Resultado resultado;
 
     //Se inicializa MPI y se le pasa los argumentos del programa
     MPI_Comm_size(MPI_COMM_WORLD, &numeroProcesos);
@@ -49,7 +48,13 @@ int main (int argc, char **argv) {
     fscanf(file, "%i", &size);      //Lee el tamano del campo.
     fscanf(file, "%i", &targets);   //Lee la cantidad de blancos.
 
-    blancos = (struct Target *) malloc(sizeof(struct Target));
+    int sizeTargets = targets / numeroProcesos;
+    int remain = targets % numeroProcesos;
+
+    if (id < remain)
+        sizeTargets++;
+
+    blancos = (struct Target *) malloc(sizeTargets * sizeof(struct Target));
 
     if (blancos == NULL) {
         fprintf(stderr, "No hay memoria\n");
@@ -58,10 +63,14 @@ int main (int argc, char **argv) {
 
     /* Lee todas las lineas relevantes a los blancos, guarda el blanco
      * que le pertenece al proceso. */
+    int j = 0;
     for (i = 0; i < targets; i++) {
-        if (i == id) {
-            fscanf(file, "%i %i %i", &(blancos->coordx), &(blancos->coordy), &(blancos->strength));
-            blancos->oldStrength = blancos->strength;
+        if (i % numeroProcesos == id) {
+            fscanf(file, "%i %i %i", &(blancos[j].coordx),
+                                        &(blancos[j].coordy),
+                                            &(blancos[j].strength));
+            blancos[j].oldStrength = blancos[j].strength;
+            j++;
         } else
             fscanf(file, "%*i %*i %*i");
     }
@@ -91,45 +100,55 @@ int main (int argc, char **argv) {
 
     /* Hace los calculos de los ataques en los blancos. Cada proceso calcula
      * la fuerza del blanco despues del ataque. */
-    for (i = 0; i < numAttacks; i++) {
-        struct Attack singleAttack = attacks[i];
-        radioX_Sup = singleAttack.coordx + singleAttack.radius;
-        radioY_Sup = singleAttack.coordy + singleAttack.radius;
-        radioX_Inf = singleAttack.coordx - singleAttack.radius;
-        radioY_Inf = singleAttack.coordy - singleAttack.radius;
+    struct Resultado resultado[sizeTargets];
 
-        if ((radioX_Inf <= blancos->coordx && blancos->coordx <= radioX_Sup)
-            && (radioY_Inf <= blancos->coordy && blancos->coordy <= radioY_Sup)) {
+    for (j = 0; j < sizeTargets; ++j) {
+        for (i = 0; i < numAttacks; i++) {
+            struct Attack singleAttack = attacks[i];
+            radioX_Sup = singleAttack.coordx + singleAttack.radius;
+            radioY_Sup = singleAttack.coordy + singleAttack.radius;
+            radioX_Inf = singleAttack.coordx - singleAttack.radius;
+            radioY_Inf = singleAttack.coordy - singleAttack.radius;
 
-            // Si el blanco es militar
-            if (blancos->oldStrength < 0) {
-                blancos->strength += singleAttack.power;
+            if ((radioX_Inf <= blancos[j].coordx && blancos[j].coordx <= radioX_Sup)
+                && (radioY_Inf <= blancos[j].coordy && blancos[j].coordy <= radioY_Sup)) {
 
-                // Si el blanco es destruido asigna 0
-                if (blancos->strength >= 0)
-                    blancos->strength = 0;
-            } else {
-                blancos->strength -= singleAttack.power;
+                // Si el blanco es militar
+                if (blancos[j].oldStrength < 0) {
+                    blancos[j].strength += singleAttack.power;
 
-                // Si el blanco es destruido asigna 0
-                if (blancos->strength <= 0)
-                    blancos->strength = 0;
+                    // Si el blanco es destruido asigna 0
+                    if (blancos[j].strength >= 0)
+                        blancos[j].strength = 0;
+
+                // Si el blanco es civil
+                } else {
+                    blancos[j].strength -= singleAttack.power;
+
+                    // Si el blanco es destruido asigna 0
+                    if (blancos[j].strength <= 0)
+                        blancos[j].strength = 0;
+                }
             }
         }
+        resultado[j].oldStrength = blancos[j].oldStrength;
+        resultado[j].strength = blancos[j].strength;
     }
-    resultado.oldStrength = blancos->oldStrength;
-    resultado.strength = blancos->strength;
 
     //El proceso 0 recibe los resultados de los otros procesos y los imprime.
     if (id == 0) {
         struct Resultado respuesta[targets];
-        respuesta[0] = resultado;
 
-        for (i = 1; i < numeroProcesos; ++i) {
-            //Recibe la respuesta
+        for (j = 0; j < sizeTargets; ++j) {
+            respuesta[j] = resultado[j];
+        }
+
+        //Recibe la respuestas
+        for (i = j; i < targets; ++i) {
             MPI_Recv(&respuesta[i],2,MPI_INT,MPI_ANY_SOURCE,MPI_ANY_TAG,
                      MPI_COMM_WORLD,MPI_STATUS_IGNORE);
         }
+
         for (i = 0; i < targets; ++i) {
             // Si el blanco es CT
             if (respuesta[i].oldStrength > 0) {
@@ -143,8 +162,8 @@ int main (int argc, char **argv) {
                     else
                     intactos_CT += 1;
                 }
+            // Si el blanco es MT
             } else {
-
                 if (respuesta[i].oldStrength < respuesta[i].strength &&
                     respuesta[i].strength < 0)
                     parcial_destruidos_MT += 1;
@@ -158,17 +177,18 @@ int main (int argc, char **argv) {
             }
         }
         //Imprime los resultados
-        printf("Military Targets totally destroyed: %d\n", destruidos_MT);
+        printf("Military Targets totally destroyed: %3d\n", destruidos_MT);
         printf("Military Targets partially destroyed: %d\n", parcial_destruidos_MT);
-        printf("Military Targets not affected: %d\n", intactos_MT);
-        printf("Civilian Targets totally destroyed: %d\n", destruidos_CT);
+        printf("Military Targets not affected: %8d\n", intactos_MT);
+        printf("Civilian Targets totally destroyed: %3d\n", destruidos_CT);
         printf("Civilian Targets partially destroyed: %d\n", parcial_destruidos_CT);
-        printf("Civilian Targets not affected: %d\n", intactos_CT);
-
-    //Manda el resultado al proceso 0.
-    } else
-        MPI_Send(&resultado,2,MPI_INT,0,0,MPI_COMM_WORLD);
-
+        printf("Civilian Targets not affected: %8d\n", intactos_CT);
+    } else {
+        //Manda los resultados al proceso 0.
+        for (i = 0; i < sizeTargets; ++i) {
+            MPI_Send(&resultado[i],2,MPI_INT,0,0,MPI_COMM_WORLD);
+        }
+    }
     free(blancos);
     free(attacks);
     MPI_Finalize();
